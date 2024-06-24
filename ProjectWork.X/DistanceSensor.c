@@ -1,183 +1,261 @@
-#include <xc.h>  // Include device-specific header
-#include <pic16f877a.h>
-#include <string.h>
-#define _XTAL_FREQ 20000000  // Define the oscillator frequency
+#include <xc.h>                // Include device-specific header
+#include <pic16f877a.h>        // PIC16F877A specific definitions
+#include <string.h>            // String library
+#include <stdio.h>
+#include <math.h>
+
+#define _XTAL_FREQ 20000000    // Define the oscillator frequency (20 MHz)
 
 // CONFIG
-#pragma config FOSC = HS        // Oscillator Selection bits (XT/HS oscillator)
-#pragma config WDTE = OFF       // Watchdog Timer Enable bit (WDT disabled)
-#pragma config PWRTE = OFF      // Power-up Timer Enable bit (PWRT disabled)
-#pragma config BOREN = OFF      // Brown-out Reset Enable bit (BOR disabled)
-#pragma config LVP = ON        // Low-Voltage (Single-Supply) In-Circuit Serial Programming Enable bit (RB3 is digital I/O, HV on MCLR must be used for programming)
-#pragma config CPD = OFF        // Data EEPROM Memory Code Protection bit (Data EEPROM code protection off)
-#pragma config WRT = OFF        // Flash Program Memory Write Enable bits (Write protection off; all program memory may be written to by EECON control)
-#pragma config CP = OFF         // Flash Program Memory Code Protection bit (Code protection off)
+#pragma config FOSC = HS       // Oscillator Selection bits (HS oscillator)
+#pragma config WDTE = OFF      // Watchdog Timer Enable bit (WDT disabled)
+#pragma config PWRTE = OFF     // Power-up Timer Enable bit (PWRT disabled)
+#pragma config BOREN = OFF     // Brown-out Reset Enable bit (BOR disabled)
+#pragma config LVP = ON        // Low-Voltage (Single-Supply) In-Circuit Serial Programming Enable bit
+#pragma config CPD = OFF       // Data EEPROM Memory Code Protection bit (Data EEPROM code protection off)
+#pragma config WRT = OFF       // Flash Program Memory Write Enable bits (Write protection off)
+#pragma config CP = OFF        // Flash Program Memory Code Protection bit (Code protection off)
 
-#define RS PORTCbits.RC0
-#define RW PORTCbits.RC4
-#define EN PORTCbits.RC1
+#define RS PORTDbits.RD2       // Define RS pin for LCD
+#define EN PORTDbits.RD3       // Define EN pin for LCD
 
-void lcd_cmd(unsigned char cmd)
-{
-    PORTD = (cmd & 0xF0);
-    EN = 1;
-    RW = 0;
-    RS = 0;
-    __delay_ms(10);
-    EN = 0;
-    PORTD = ((cmd<<4) & 0xF0);
-    EN = 1;
-    RW = 0;
-    RS = 0;
-    __delay_ms(10);
-    EN = 0;
+// Function to send commands to the LCD
+void lcd_cmd(unsigned char cmd) {
+    PORTD = (cmd & 0xF0);       // Send higher nibble
+    EN = 1;                     // Enable high
+    RS = 0;                     // Command mode
+    __delay_ms(10);             // Delay
+    EN = 0;                     // Enable low
+    PORTD = ((cmd << 4) & 0xF0);// Send lower nibble
+    EN = 1;                     // Enable high
+    RS = 0;                     // Command mode
+    __delay_ms(10);             // Delay
+    EN = 0;                     // Enable low
 }
 
-void lcd_data(unsigned char data)
-{
-    PORTD = (data & 0xF0);
-    EN = 1;
-    RW = 0;
-    RS = 1;
-    __delay_ms(10);
-    EN = 0;
-    PORTD = ((data<<4) & 0xF0);
-    EN = 1;
-    RW = 0;
-    RS = 1;
-    __delay_ms(10);
-    EN = 0;
+// Function to send data to the LCD
+void lcd_data(unsigned char data) {
+    PORTD = (data & 0xF0);      // Send higher nibble
+    EN = 1;                     // Enable high
+    RS = 1;                     // Data mode
+    __delay_ms(10);             // Delay
+    EN = 0;                     // Enable low
+    PORTD = ((data << 4) & 0xF0);// Send lower nibble
+    EN = 1;                     // Enable high
+    RS = 1;                     // Data mode
+    __delay_ms(10);             // Delay
+    EN = 0;                     // Enable low
 }
 
-void lcd_init()
-{
-    lcd_cmd(0x02);
-    lcd_cmd(0x28); //4bit mode and 16 columns and 2 rows of led
-    lcd_cmd(0x0C);
-    lcd_cmd(0x06); // auto increment
-    lcd_cmd(0x01); // clear screen
-    __delay_ms(20);
+// Function to initialize the LCD
+void lcd_init() {
+    lcd_cmd(0x02);              // Initialize LCD in 4-bit mode
+    lcd_cmd(0x28);              // 4-bit mode, 2 lines, 5x7 matrix
+    lcd_cmd(0x0C);              // Display on, cursor off
+    lcd_cmd(0x06);              // Increment cursor
+    lcd_cmd(0x01);              // Clear display
+    __delay_ms(20);             // Delay
 }
 
-void lcd_string(const unsigned char *str, unsigned char num)
-{
+// Function to send a string to the LCD
+void lcd_string(const unsigned char *str, unsigned char num) {
     unsigned char i;
-    for(i=0;i<num;i++)
-    {
-        lcd_data(str[i]);
+    for (i = 0; i < num; i++) {
+        lcd_data(str[i]);       // Send each character to the LCD
     }
 }
-void main() 
-{
-    TRISB = 0b00110000; //RB3 and 4 as Input PIN (ECHO)
-    TRISC = 0x00;
-    TRISD = 0x00;
-    lcd_init();
-    __delay_ms(10);
-    
-    int a[2] = {0,0};
-    T1CON = 0x10;    
-            
-    while(1)    
-    {       
-        lcd_cmd(0x82);
-        lcd_string("Distance:",9);
-        __delay_ms(10);
-        for (int i = 0; i < 2; i++)
-        {
-            TMR1H = 0;                //Sets the Initial Value of Timer
-            TMR1L = 0;                //Sets the Initial Value of Timer
-            
-            PORTB = (1 << i); //i-th trigger
-            __delay_us(10);
-            PORTB = 0;
-            while(!(PORTB & (0x10 <<i))); //4+i th echo
-            TMR1ON = 1;
-            while(PORTB & (0x10 <<i));
-            TMR1ON = 0;
-            a[i] = (TMR1L | (TMR1H<<8)); //Reads Timer Value
-            a[i] = a[i]/50;              //Converts Time to Distance
-            a[i] = a[i] + 1;                //Distance Calibration   
+
+void display(int number);
+
+// Main function
+void main() {
+    TRISD = 0x00;               // Set PORTD as output
+    __delay_ms(50);             // Delay
+
+    TRISC = 0b11110000;         // Set RC4 - RC7 as input (Echo pins)
+    __delay_ms(50);             // Delay
+
+    lcd_init();                 // Initialize the LCD
+    __delay_ms(50);             // Delay
+
+    //int a[4] = {0, 0, 0, 0};    // Array to store distance values
+    T1CON = 0x10;               // Configure Timer1
+    __delay_ms(30);
+
+    while (1) {                 // Infinite loop
         
-            if(i == 0){lcd_cmd(0xC0);
-                lcd_string("L", 1);
-                __delay_ms(5);
-            lcd_cmd(0xC1);}
-            if(i == 1){lcd_cmd(0xC8);
-                lcd_string("R", 1);
-                __delay_ms(5);
-            lcd_cmd(0xC9);}
-            
-            if(a[i] >= 2 && a[i]<=15)        //less than 5 cm
-                { 
-                    //lcd_cmd(0xC0);
-                    lcd_string(" < 5 cm", 7);
-                    __delay_ms(50);
+        int a[4] = {0, 0, 0, 0};    // Array to store distance values
+        __delay_ms(20);  // Delay
+        
+        lcd_cmd(0x80);  // Set cursor position
+        lcd_string("A  cm  B  cm  ", 14); // Display "A" for 1st sensor
+        __delay_ms(40);  // Delay
+        lcd_cmd(0xC0);  // Set cursor position
+        lcd_string("C  cm  D  cm  ", 14); // Display "C" for 3rd sensor
+        __delay_ms(40);  // Delay
+        
+        for (int i = 0; i < 4; i++) {
+            __delay_ms(5);
 
-                    PORTCbits.RC2 = 1;
-                    __delay_ms(1500);
-                    PORTCbits.RC2 = 0;
-                    __delay_ms(50);
-                } 
-            if(a[i]>=15 && a[i]<=30)        //5 - 10 cm
-                {   
-                    //lcd_cmd(0xC0);
-                    lcd_string(" <10 cm",7);
-                    __delay_ms(50);
+            TMR1H = 0;          // Reset Timer1 high byte
+            TMR1L = 0;          // Reset Timer1 low byte
 
-                    PORTCbits.RC2 = 1;
-                    __delay_ms(100);
-                    PORTCbits.RC2 = 0;
-                    __delay_ms(100);
-                    PORTCbits.RC2 = 1;
-                    __delay_ms(100);
-                    PORTCbits.RC2 = 0;
-                    __delay_ms(100);
-                    PORTCbits.RC2 = 1;
-                    __delay_ms(100);
-                    PORTCbits.RC2 = 0;
-                    __delay_ms(300);
-                }
+            PORTC = (1 << i);   // Trigger the i-th sensor
+            __delay_us(10);     // Short delay
+            PORTC = 0;          // Clear trigger pin
 
-            if(a[i]>=30 && a[i]<=60)        //between 10 and 20 cm
-                {   
-                    //lcd_cmd(0xC0);
-                    lcd_string("10-20cm",7);
-                    __delay_ms(50);
+            while (!(PORTC & (0x10 << i))); // Wait for echo to go high of i + 4
+            TMR1ON = 1;         // Start Timer1
+            while (PORTC & (0x10 << i)); // Wait for echo to go low of i + 4
+            TMR1ON = 0;         // Stop Timer1
+            a[i] = (TMR1L | (TMR1H << 8)) / 50; // Read Timer1 value
+            a[i] = (a[i] + 1) / 3;    // Calibration adjustment to cm
 
-                    PORTCbits.RC2 = 1;
-                    __delay_ms(100);
-                    PORTCbits.RC2 = 0;
-                    __delay_ms(100);
-                    PORTCbits.RC2 = 1;
-                    __delay_ms(100);
-                    PORTCbits.RC2 = 0;
-                    __delay_ms(500);
-                }
+            if (i == 0) {        // If first sensor
+                lcd_cmd(0x81);  // Set cursor position
+                __delay_ms(40);
+                
+            } else if (i == 1) { // If second sensor
+                int result = (a[0] > a[1]) ? (a[0] - a[1]) : (a[1] - a[0]);
+                double res1 = atan(result / 8.0) * (180.0 / 3.14159265);
+                int angle = (int)res1;
+                lcd_cmd(0x8E);
+                display(angle);
+                __delay_ms(40);  // Delay
+                lcd_cmd(0x88);  // Set cursor position
+                __delay_ms(40);
+            } else if (i == 2) { // If third sensor
+                lcd_cmd(0xC1);  // Set cursor position
+                __delay_ms(30);
+            } else if (i == 3) { // If fourth sensor
+                int result2 = (a[2] > a[3]) ? (a[2] - a[3]) : (a[3] - a[2]);
+                double res12 = atan(result2 / 8.0) * (180.0 / 3.14159265);
+                int angle2 = (int)res12;
+                lcd_cmd(0xCE);
+                display(angle2);
+                __delay_ms(40);
+                lcd_cmd(0xC8);  // Set cursor position
+                __delay_ms(30);
+            }
 
-            if(a[i]>=60 && a[i]<=150)        //between 20 and 50 cm
-                {   
-                    //lcd_cmd(0xC0);
-                    lcd_string("20-50cm",7);
-                    __delay_ms(50);
+            // Display distance and control an LED based on the distance
+            if (a[i] >= 1 && a[i] <= 5) {
+                lcd_string("Alert", 5);
+                PORTDbits.RD1 = 1; // Turn on LED and buzzer
+                PORTDbits.RD0 = 1;
+                __delay_ms(1000); // Delay
+                PORTDbits.RD1 = 0; // Turn on LED and buzzer
+                PORTDbits.RD0 = 0;
+                __delay_ms(20); // Delay
+            } 
+            else if (a[i] >= 1 && a[i] <= 99) {
+                display(a[i]);
+                __delay_ms(20); // Delay
+            }
 
-                    PORTCbits.RC2 = 1;
-                    __delay_ms(10);
-                    PORTCbits.RC2 = 0;
-                    __delay_ms(600);
-                }
+            if (a[0] >= 5 && a[0] <= 10) {
+                PORTDbits.RD1 = 1; // Turn on LED and buzzer
+                __delay_ms(10); // Delay
+                PORTDbits.RD1 = 0; // Turn off LED and buzzer
+                __delay_ms(20); // Delay
+                PORTDbits.RD1 = 1; // Turn on LED and buzzer
+                __delay_ms(10); // Delay
+                PORTDbits.RD1 = 0; // Turn on LED and buzzer
+                __delay_ms(20); // Delay
+                
+            }
+/*
+            else if (a[0] > 10) {
+                PORTDbits.RD0 = 0; // Turn off LED ONLY
+                __delay_ms(10); // Delay
+                PORTDbits.RD1 = 0; // Turn off LED and buzzer
+                __delay_ms(10); // Delay
+  } 
+ */
+             
+            if (a[i] > 99 || a[i] < 1) {
+                lcd_string(" FAR", 4); // Display "FAR"
+                __delay_ms(20); // Delay
+            }
 
-            if(a[i]>=150 || a[i]<=2)        //Further than 50 cm
-                { 
-                    //lcd_cmd(0xC0);
-                    lcd_string("too far",7);
-                    __delay_ms(50);
-
-                }
-            
-        __delay_ms(400);
+            __delay_ms(100);     // Delay
         }
-        __delay_ms(10);
+        __delay_ms(100);         // Delay
     }
     return;
+}
+
+void display(int number) {
+    if ((number / 10) > 0) {
+        switch (number / 10) {
+            case 0:
+                lcd_string("0", 1);
+                break;
+            case 1:
+                lcd_string("1", 1);
+                break;
+            case 2:
+                lcd_string("2", 1);
+                break;
+            case 3:
+                lcd_string("3", 1);
+                break;
+            case 4:
+                lcd_string("4", 1);
+                break;
+            case 5:
+                lcd_string("5", 1);
+                break;
+            case 6:
+                lcd_string("6", 1);
+                break;
+            case 7:
+                lcd_string("7", 1);
+                break;
+            case 8:
+                lcd_string("8", 1);
+                break;
+            case 9:
+                lcd_string("9", 1);
+                break;
+        }
+        
+        lcd_cmd(0x14); // Shift right
+        __delay_ms(20);
+        lcd_cmd(0x10); // Shift right
+        __delay_ms(20);
+    }
+
+    switch (number % 10) {
+        case 0:
+            lcd_string("0", 1);
+            break;
+        case 1:
+            lcd_string("1", 1);
+            break;
+        case 2:
+            lcd_string("2", 1);
+            break;
+        case 3:
+            lcd_string("3", 1);
+            break;
+        case 4:
+            lcd_string("4", 1);
+            break;
+        case 5:
+            lcd_string("5", 1);
+            break;
+        case 6:
+            lcd_string("6", 1);
+            break;
+        case 7:
+            lcd_string("7", 1);
+            break;
+        case 8:
+            lcd_string("8", 1);
+            break;
+        case 9:
+            lcd_string("9", 1);
+            break;
+    }
 }
